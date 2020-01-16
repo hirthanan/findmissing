@@ -9,10 +9,15 @@ import subprocess
 import sys
 import sqlite3
 
-from config import chromeos_path, chromeos_branches
-from common import workdir, chromeosdb, upstreamdb, chromeos_branch
+from enum import Enum
+from config import stable_path, stable_branches, chromeos_path, chromeos_branches
+from common import workdir, stabledb, upstreamdb, stable_branch, chromeosdb, upstreamdb, chromeos_branch
 
 nowhere = open('/dev/null', 'w')
+
+class Path(Enum):
+    stable = 1
+    chromeos = 2
 
 def get_status(sha):
   '''
@@ -88,18 +93,20 @@ def getcontext(bname, sdb, udb, usha, recursive):
                     (str, bname))
             getcontext(bname, sdb, udb, fsha, True)
 
-def missing(version):
+def missing(version, release):
   """
-  Look for missing Fixup commits in provided chromeos release
+  Look for missing Fixup commits in provided chromeos or stable release
   """
 
-  bname = chromeos_branch(version)
+  bname = stable_branch(version) if release == Path.stable else chromeos_branch(version)
 
   print("Checking branch %s" % bname)
 
   subprocess.check_output(['git', 'checkout', bname], stderr=nowhere)
 
-  sdb = sqlite3.connect(chromeosdb(version))
+  chosen_db = stabledb(version) if release == Path.stable else chromeosdb(version)
+
+  sdb = sqlite3.connect(chosen_db)
   cs = sdb.cursor()
   udb = sqlite3.connect(upstreamdb)
   cu = udb.cursor()
@@ -111,14 +118,33 @@ def missing(version):
   udb.close()
   sdb.close()
 
-def findmissing():
-  if len(sys.argv) > 1:
-    branches = sys.argv[1:]
-  else:
-    branches = chromeos_branches
 
-  os.chdir(chromeos_path)
-  for b in branches:
-    missing(b)
+def findmissing_helper(release):
+    """
+    Finds the missing patches in the stable and chromeos releases.
+    """
+    if len(sys.argv) > 1:
+        branches = sys.argv[1:]
+    else:
+        branches = stable_branches if release == Path.stable else chromeos_branches
+
+    path = stable_path if release == Path.stable else chromeos_path
+    
+    os.chdir(path)
+    for b in branches:
+        missing(b, release)
+
+
+def findmissing():
+    cur_wd = os.getcwd()
+
+    print("--Missing patches from baseline -> stable.--")
+    findmissing_helper(Path.stable)
+
+    os.chdir(cur_wd)
+
+    print("--Missing patches from baseline -> chromeos.--")
+    findmissing_helper(Path.chromeos)
+
 
 findmissing()
